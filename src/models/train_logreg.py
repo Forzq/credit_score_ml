@@ -41,7 +41,6 @@ from src.features.clipper import QuantileClipper
 
 
 
-# ===== KS Metric =====
 def ks_statistic(y_true: np.ndarray, y_score: np.ndarray) -> float:
     order = np.argsort(y_score)
     y = y_true[order]
@@ -63,17 +62,16 @@ def ks_statistic(y_true: np.ndarray, y_score: np.ndarray) -> float:
 
 def main() -> None:
 
-    # 1️⃣ Load
     df = pd.read_csv(DATA_PATH)
 
-    # 2️⃣ Deterministic preprocess
+    # Deterministic preprocess
     df = preprocess_deterministic(df)
 
-    # 3️⃣ X / y
+    # X / y
     X = df[NUM_COLS + CAT_COLS].copy()
     y = df[TARGET].astype(int).values
 
-    # 4️⃣ Split
+    # Split
     X_train, X_test, y_train, y_test = train_test_split(
         X,
         y,
@@ -82,20 +80,17 @@ def main() -> None:
         stratify=y
     )
 
-    # 5️⃣ Numeric pipeline
     numeric_pipe = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="median")),
         ("clip", QuantileClipper(0.01, 0.99)),
         ("scaler", StandardScaler()),
     ])
 
-    # 6️⃣ Categorical pipeline
     categorical_pipe = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="most_frequent")),
         ("ohe", OneHotEncoder(handle_unknown="ignore")),
     ])
 
-    # 7️⃣ ColumnTransformer
     preprocessor = ColumnTransformer(
         transformers=[
             ("num", numeric_pipe, NUM_COLS),
@@ -103,7 +98,7 @@ def main() -> None:
         ]
     )
 
-    # 8️⃣ Final model pipeline
+    # Final model pipeline
     model = Pipeline(steps=[
         ("prep", preprocessor),
         ("logreg", LogisticRegression(
@@ -113,13 +108,11 @@ def main() -> None:
         )),
     ])
 
-    # 9️⃣ Fit
     model.fit(X_train, y_train)
 
-    # 🔟 Predict
     p_test = model.predict_proba(X_test)[:, 1]
 
-    # 1️⃣1️⃣ Metrics
+    # Metrics
     roc_auc = roc_auc_score(y_test, p_test)
     pr_auc = average_precision_score(y_test, p_test)
     ks = ks_statistic(y_test, p_test)
@@ -129,7 +122,7 @@ def main() -> None:
     print(f"PR-AUC:  {pr_auc:.4f}")
     print(f"KS:      {ks:.4f}")
 
-    # 1️⃣2️⃣ Save
+    # Save
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     joblib.dump(model, MODEL_PATH)
 

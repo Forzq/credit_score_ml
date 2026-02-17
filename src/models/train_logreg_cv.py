@@ -17,7 +17,7 @@ from sklearn.metrics import roc_auc_score, average_precision_score
 from src.preprocess import preprocess_deterministic
 
 
-DATA_PATH = "data/raw/credit_risk.csv"
+DATA_PATH = "data/credit_risk_dataset.csv"
 TARGET = "loan_status"
 
 REPORT_PATH = "reports/cv_metrics.csv"
@@ -38,7 +38,6 @@ CAT_COLS = [
 ]
 
 
-# ===== Quantile Clipper =====
 class QuantileClipper(BaseEstimator, TransformerMixin):
     def __init__(self, lower_q=0.01, upper_q=0.99):
         self.lower_q = lower_q
@@ -55,7 +54,6 @@ class QuantileClipper(BaseEstimator, TransformerMixin):
         return np.clip(X, self.lo_, self.hi_)
 
 
-# ===== KS =====
 def ks_statistic(y_true: np.ndarray, y_score: np.ndarray) -> float:
     order = np.argsort(y_score)
     y = y_true[order]
@@ -109,7 +107,6 @@ def build_pipeline() -> Pipeline:
 
 def main() -> None:
 
-    # 1️⃣ Load + preprocess
     df = pd.read_csv(DATA_PATH)
     df = preprocess_deterministic(df)
 
@@ -153,7 +150,6 @@ def main() -> None:
     print("\n===== CV Summary =====")
     print(metrics_df.describe().loc[["mean", "std"]])
 
-    # 2️⃣ Save report
     os.makedirs(os.path.dirname(REPORT_PATH), exist_ok=True)
     metrics_df.to_csv(REPORT_PATH, index=False)
 

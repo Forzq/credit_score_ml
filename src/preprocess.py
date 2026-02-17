@@ -14,14 +14,10 @@ def fix_invalid_emp_length(df: pd.DataFrame, max_years: int = 70) -> pd.DataFram
     return df
 
 def preprocess_deterministic(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Только deterministic логика (без медиан/квантилей).
-    """
     df = df.copy()
     df = drop_columns(df, DROP_FEATURES)
     df = fix_invalid_emp_length(df, max_years=70)
     return df
 
-# алиас, чтобы твой make_dataset.py не ломался
 def preprocess(df: pd.DataFrame) -> pd.DataFrame:
     return preprocess_deterministic(df)

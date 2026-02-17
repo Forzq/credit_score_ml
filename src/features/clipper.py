@@ -5,10 +5,6 @@ from sklearn.base import BaseEstimator, TransformerMixin
 
 
 class QuantileClipper(BaseEstimator, TransformerMixin):
-    """
-    Клиппинг по квантилям. fit() считает пороги на train,
-    transform() клиппит новые данные теми же порогами.
-    """
     def __init__(self, lower_q: float = 0.01, upper_q: float = 0.99):
         self.lower_q = lower_q
         self.upper_q = upper_q
