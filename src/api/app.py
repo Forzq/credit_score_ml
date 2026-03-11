@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import os
+import time
+from datetime import datetime, timezone
+from threading import Lock
+
 import joblib
 import pandas as pd
-
-from fastapi import FastAPI, Form
+from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 MODEL_PATH = "models/logreg.joblib"
+MODEL_VERSION = "1.0.0"
 
 NUM_COLS = [
     "person_income",
@@ -28,18 +32,37 @@ ALL_COLS = NUM_COLS + CAT_COLS
 app = FastAPI(title="Система кредитного скоринга")
 
 _model = None
+_model_loaded_at: str | None = None
+
+_metrics_lock = Lock()
+_metrics = {
+    "predict_requests_total": 0,
+    "predict_errors_total": 0,
+    "predict_latency_sum_ms": 0.0,
+    "predict_latency_count": 0,
+    "predict_latency_values_ms": [],
+}
 
 
 def load_model():
-    global _model
+    global _model, _model_loaded_at
     if _model is None:
         if not os.path.exists(MODEL_PATH):
             raise FileNotFoundError(
-                f"Модель не найдена: {MODEL_PATH}. Сначала обучи её:\n"
+                f"Model not found: {MODEL_PATH}. Train it first:\n"
                 f"python -m src.models.train_logreg"
             )
         _model = joblib.load(MODEL_PATH)
+        _model_loaded_at = datetime.now(timezone.utc).isoformat()
     return _model
+
+
+@app.on_event("startup")
+def startup_event():
+    try:
+        load_model()
+    except FileNotFoundError:
+        pass
 
 
 def decision_from_proba(proba_default: float, threshold: float = 0.5) -> str:
@@ -60,6 +83,29 @@ def decision_color(decision: str) -> str:
 
 def percent(v: float) -> str:
     return f"{v * 100:.2f}%"
+
+
+def risk_class_from_proba(proba_default: float) -> str:
+    if proba_default < 0.33:
+        return "low"
+    if proba_default < 0.66:
+        return "medium"
+    return "high"
+
+
+def record_predict_metrics(latency_ms: float, is_error: bool = False) -> None:
+    with _metrics_lock:
+        if is_error:
+            _metrics["predict_errors_total"] += 1
+            return
+
+        _metrics["predict_requests_total"] += 1
+        _metrics["predict_latency_sum_ms"] += latency_ms
+        _metrics["predict_latency_count"] += 1
+        _metrics["predict_latency_values_ms"].append(latency_ms)
+
+        if len(_metrics["predict_latency_values_ms"]) > 10000:
+            _metrics["predict_latency_values_ms"] = _metrics["predict_latency_values_ms"][-10000:]
 
 
 def render_page(content: str, title: str = "Кредитный скоринг") -> str:
@@ -632,7 +678,11 @@ def predict_form(
 
     result_label = decision_ru(decision)
     color = decision_color(decision)
-    approve_text = "Заявка выглядит приемлемой по текущему порогу." if decision == "APPROVE" else "Риск дефолта слишком высокий для текущего порога."
+    approve_text = (
+        "Заявка выглядит приемлемой по текущему порогу."
+        if decision == "APPROVE"
+        else "Риск дефолта слишком высокий для текущего порога."
+    )
 
     content = f"""
     <div class="card">
@@ -712,34 +762,86 @@ class PredictRequest(BaseModel):
     threshold: float = Field(default=0.5, ge=0, le=1)
 
 
+@app.post("/predict", response_class=JSONResponse)
+def predict(req: PredictRequest):
+    started = time.perf_counter()
+
+    try:
+        model = load_model()
+
+        loan_percent_income = req.loan_amnt / req.person_income
+
+        payload = {
+            "person_income": req.person_income,
+            "person_emp_length": req.person_emp_length,
+            "loan_amnt": req.loan_amnt,
+            "loan_int_rate": req.loan_int_rate,
+            "loan_percent_income": loan_percent_income,
+            "person_home_ownership": req.person_home_ownership.strip().upper(),
+            "loan_intent": req.loan_intent.strip().upper(),
+            "loan_grade": req.loan_grade.strip().upper(),
+            "cb_person_default_on_file": req.cb_person_default_on_file.strip().upper(),
+        }
+
+        X = pd.DataFrame([payload], columns=ALL_COLS)
+        proba_default = float(model.predict_proba(X)[:, 1][0])
+        decision = decision_from_proba(proba_default, threshold=req.threshold)
+
+        latency_ms = (time.perf_counter() - started) * 1000
+        record_predict_metrics(latency_ms=latency_ms, is_error=False)
+
+        return {
+            "decision": decision,
+            "decision_ru": decision_ru(decision),
+            "probability": proba_default,
+            "confidence": confidence_from_proba(proba_default),
+            "risk_class": risk_class_from_proba(proba_default),
+            "threshold": req.threshold,
+            "derived": {"loan_percent_income": loan_percent_income},
+        }
+
+    except FileNotFoundError as e:
+        record_predict_metrics(latency_ms=0.0, is_error=True)
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        record_predict_metrics(latency_ms=0.0, is_error=True)
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+
+
 @app.post("/predict_v2", response_class=JSONResponse)
 def predict_v2(req: PredictRequest):
-    model = load_model()
+    return predict(req)
 
-    loan_percent_income = req.loan_amnt / req.person_income
 
-    payload = {
-        "person_income": req.person_income,
-        "person_emp_length": req.person_emp_length,
-        "loan_amnt": req.loan_amnt,
-        "loan_int_rate": req.loan_int_rate,
-        "loan_percent_income": loan_percent_income,
-        "person_home_ownership": req.person_home_ownership.strip().upper(),
-        "loan_intent": req.loan_intent.strip().upper(),
-        "loan_grade": req.loan_grade.strip().upper(),
-        "cb_person_default_on_file": req.cb_person_default_on_file.strip().upper(),
-    }
-
-    X = pd.DataFrame([payload], columns=ALL_COLS)
-    proba_default = float(model.predict_proba(X)[:, 1][0])
-
-    decision = decision_from_proba(proba_default, threshold=req.threshold)
+@app.get("/health", response_class=JSONResponse)
+def health():
+    if _model is None:
+        if not os.path.exists(MODEL_PATH):
+            raise HTTPException(
+                status_code=503,
+                detail=f"Model file is missing: {MODEL_PATH}",
+            )
+        load_model()
 
     return {
-        "decision": decision,
-        "decision_ru": decision_ru(decision),
-        "proba_default": proba_default,
-        "confidence": confidence_from_proba(proba_default),
-        "threshold": req.threshold,
-        "derived": {"loan_percent_income": loan_percent_income},
+        "status": "ok",
+        "model_version": MODEL_VERSION,
+        "loaded_at": _model_loaded_at,
+    }
+
+
+@app.get("/metrics", response_class=JSONResponse)
+def metrics():
+    with _metrics_lock:
+        total = _metrics["predict_requests_total"]
+        errors = _metrics["predict_errors_total"]
+        count = _metrics["predict_latency_count"]
+        avg = _metrics["predict_latency_sum_ms"] / count if count > 0 else 0.0
+        histogram = list(_metrics["predict_latency_values_ms"][-100:])
+
+    return {
+        "predict_requests_total": total,
+        "predict_errors_total": errors,
+        "predict_latency_avg_ms": avg,
+        "histogram_latency_ms": histogram,
     }
