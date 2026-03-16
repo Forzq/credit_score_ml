@@ -12,7 +12,7 @@ sys.path.append(str(PROJECT_ROOT))
 from src.preprocess import NUMERIC_FEATURES, TARGET
 
 
-df = pd.read_csv('data/credit_risk_dataset.csv')
+df = pd.read_csv('../data/credit_risk_dataset.csv')
 
 df.info()
 df.isna().mean()

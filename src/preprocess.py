@@ -3,6 +3,7 @@ import pandas as pd
 
 TARGET = "loan_status"
 DROP_FEATURES = ["person_age", "cb_person_cred_hist_length"]
+NUMERIC_FEATURES = ["person_age", "person_income", "person_emp_length", "loan_amnt", "loan_int_rate", "loan_percent_income", "cb_person_cred_hist_length"]
 
 def drop_columns(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
     return df.drop(columns=cols, errors="ignore")
