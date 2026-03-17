@@ -12,7 +12,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score, average_precision_score
+from sklearn.metrics import roc_auc_score, average_precision_score, accuracy_score
 
 from src.preprocess import preprocess_deterministic
 
@@ -132,17 +132,21 @@ def main() -> None:
         roc_auc = roc_auc_score(y_valid, p_valid)
         pr_auc = average_precision_score(y_valid, p_valid)
         ks = ks_statistic(y_valid, p_valid)
+        y_pred = (p_valid >= 0.6).astype(int)
+        accur = accuracy_score(y_valid, y_pred)
 
         print(f"\nFold {fold}")
         print(f"ROC-AUC: {roc_auc:.4f}")
         print(f"PR-AUC:  {pr_auc:.4f}")
         print(f"KS:      {ks:.4f}")
+        print(f'Accuracy: {accur:.4f}')
 
         metrics.append({
             "fold": fold,
             "roc_auc": roc_auc,
             "pr_auc": pr_auc,
             "ks": ks,
+            'accur': accur,
         })
 
     metrics_df = pd.DataFrame(metrics)
